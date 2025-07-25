@@ -34,4 +34,4 @@ jobs:
         mkdir build
         cd build
         cmake ..
-        ctest --output-on-failure --parallel 2
+        ctest -C Release --output-on-failure --parallel 2
