@@ -67,26 +67,26 @@ endfunction()
 
 # Simple functionality tests
 add_prerequisite_test(simple/immediate)
-add_prerequisite_test(simple/deferred COMMAND "--target deferred-build")
+add_prerequisite_test(simple/deferred COMMAND --target deferred-build)
 
 # Stamp file behavior tests
-add_prerequisite_test(stamp/behavior COMMAND "--target test_stamps")
+add_prerequisite_test(stamp/behavior COMMAND --target test_stamps)
 
 # Advanced stamp behavior tests that will FAIL if stamps don't work
-add_prerequisite_test(stamp/incremental COMMAND "--target verify_no_rerun")
-add_prerequisite_test(stamp/reconfig COMMAND "--target verify_reconfig") 
-add_prerequisite_test(stamp/missing COMMAND "--target test_missing_stamp")
+add_prerequisite_test(stamp/incremental COMMAND --target verify_no_rerun)
+add_prerequisite_test(stamp/reconfig COMMAND --target verify_reconfig) 
+add_prerequisite_test(stamp/missing COMMAND --target test_missing_stamp)
 
 # File dependency tracking tests
-add_prerequisite_test(stamp/file_deps COMMAND "--target test_file_deps")
-add_prerequisite_test(stamp/file_timestamp COMMAND "--target test_timestamp_behavior")
+add_prerequisite_test(stamp/file_deps COMMAND --target test_file_deps)
+add_prerequisite_test(stamp/file_timestamp COMMAND --target test_timestamp_behavior)
 
 # Variable substitution tests
 add_prerequisite_test(substitution/immediate)
-add_prerequisite_test(substitution/deferred COMMAND "--target verify_deferred_substitution")
+add_prerequisite_test(substitution/deferred COMMAND --target verify_deferred_substitution)
 
 # Systematic dependency tracking behavior tests
-add_prerequisite_test(dependency/basic_file_behavior COMMAND "--target test_basic_file_behavior")
-add_prerequisite_test(dependency/new_file_detection COMMAND "--target test_new_file_detection") 
-add_prerequisite_test(dependency/untracked_file_behavior COMMAND "--target test_untracked_file_behavior")
-add_prerequisite_test(dependency/file_vs_stamp_comparison COMMAND "--target test_file_vs_stamp_comparison")
+add_prerequisite_test(dependency/basic_file_behavior COMMAND --target test_basic_file_behavior)
+add_prerequisite_test(dependency/new_file_detection COMMAND --target test_new_file_detection) 
+add_prerequisite_test(dependency/untracked_file_behavior COMMAND --target test_untracked_file_behavior)
+add_prerequisite_test(dependency/file_vs_stamp_comparison COMMAND --target test_file_vs_stamp_comparison)
