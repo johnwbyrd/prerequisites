@@ -2,7 +2,7 @@
 
 A CMake module that solves the bootstrap problem: building tools that CMake itself needs to find.
 
-[![Tests](https://img.shields.io/badge/tests-26%2F26%20passing-brightgreen)](#testing)
+[![CI](https://github.com/jbyrd/prerequisites/workflows/CI/badge.svg)](https://github.com/jbyrd/prerequisites/actions)
 [![Documentation](https://img.shields.io/badge/docs-comprehensive-blue)](#documentation)
 
 ## The Problem
