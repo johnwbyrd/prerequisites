@@ -34,6 +34,8 @@ function(add_prerequisite_test TEST_NAME)
         COMMAND ${CMAKE_COMMAND}
             ${APT_CONFIG_ARGS}
             -DPREREQUISITE_MODULE_DIR=${PREREQUISITE_MODULE_DIR}
+            -D_PREREQUISITE_DEBUG=TRUE
+            --debug-output
             "${CMAKE_CURRENT_SOURCE_DIR}/${TEST_NAME}"
         WORKING_DIRECTORY "${TEST_DIR}"
     )
@@ -54,6 +56,7 @@ function(add_prerequisite_test TEST_NAME)
             NAME ${TEST_NAME}_build
             COMMAND ${CMAKE_COMMAND}
                 --build "${TEST_DIR}"
+                --verbose
                 ${APT_COMMAND}
             WORKING_DIRECTORY "${TEST_DIR}"
         )
