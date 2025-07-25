@@ -1,7 +1,7 @@
-cmake_minimum_required(VERSION 3.25)
+cmake_minimum_required(VERSION 3.12)
 
 # Include Prerequisite module
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../../../../dist/cmake")
+list(APPEND CMAKE_MODULE_PATH "${PREREQUISITE_MODULE_DIR}")
 include(Prerequisite)
 
 # Create execution tracking with counters that will fail if commands run multiple times

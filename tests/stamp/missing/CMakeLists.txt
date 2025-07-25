@@ -1,8 +1,8 @@
-cmake_minimum_required(VERSION 3.25)
+cmake_minimum_required(VERSION 3.12)
 project(MissingTest LANGUAGES NONE)
 
 # Include Prerequisite module  
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../../../../dist/cmake")
+list(APPEND CMAKE_MODULE_PATH "${PREREQUISITE_MODULE_DIR}")
 include(Prerequisite)
 
 # This prerequisite runs after project() to test build-time behavior

@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    name: Test on ${{ matrix.os }} with CMake ${{ matrix.cmake-version }}
+    runs-on: ${{ matrix.os }}
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        cmake-version: ['3.12', 'latest']
+        
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Install CMake
+      uses: jwlawson/actions-setup-cmake@v1.14
+      with:
+        cmake-version: ${{ matrix.cmake-version }}
+        
+    - name: Verify CMake version
+      run: cmake --version
+      
+    - name: Configure tests
+      run: cmake -S tests -B build-tests
+      
+    - name: Run test suite
+      run: ctest --test-dir build-tests --output-on-failure --parallel 2

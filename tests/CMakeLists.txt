@@ -1,5 +1,5 @@
 # Prerequisites Test Suite
-cmake_minimum_required(VERSION 3.25)
+cmake_minimum_required(VERSION 3.12)
 project(PrerequisiteTests LANGUAGES NONE)
 
 # Enable testing
@@ -9,8 +9,8 @@ enable_testing()
 set(PREREQUISITE_TEST_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
 set(PREREQUISITE_TEST_BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}")
 
-# Include the Prerequisite module we're testing
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../../cmake")
+# Set up module path for tests
+set(PREREQUISITE_MODULE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../cmake" CACHE PATH "Path to Prerequisite module directory")
 
 # Function to add a prerequisite test with process isolation
 function(add_prerequisite_test TEST_NAME)
@@ -33,6 +33,7 @@ function(add_prerequisite_test TEST_NAME)
         NAME ${TEST_NAME}
         COMMAND ${CMAKE_COMMAND}
             ${APT_CONFIG_ARGS}
+            -DPREREQUISITE_MODULE_DIR=${PREREQUISITE_MODULE_DIR}
             -S "${CMAKE_CURRENT_SOURCE_DIR}/${TEST_NAME}"
             -B "${TEST_DIR}"
         WORKING_DIRECTORY "${TEST_DIR}"

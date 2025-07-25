@@ -339,7 +339,7 @@ endfunction()
 # EXECUTION SCENARIOS:
 #
 # Scenario 1: Standalone CMake execution
-#   cmake_minimum_required(VERSION 3.25)
+#   cmake_minimum_required(VERSION 3.12)
 #   Prerequisite_Add(my_prereq ...)  # <- CMAKE_PROJECT_NAME="" -> CONFIGURE
 #   project(MyProject)                # <- Sets CMAKE_PROJECT_NAME
 #   Prerequisite_Add(my_prereq2 ...)  # <- CMAKE_PROJECT_NAME set -> BUILD TIME
@@ -347,7 +347,7 @@ endfunction()
 # Scenario 2: CTest execution (nested context)
 #   Parent process: project(TestRunner) -> sets CMAKE_PROJECT_NAME="TestRunner"
 #   Child process spawned by CTest:
-#     cmake_minimum_required(VERSION 3.25)
+#     cmake_minimum_required(VERSION 3.12)
 #     # CMAKE_PROJECT_NAME="" (child process starts with empty project name)
 #     # CMAKE_SOURCE_DIR != CMAKE_CURRENT_SOURCE_DIR (different directories)
 #     Prerequisite_Add(test_prereq ...) # <- Either condition -> CONFIGURE TIME

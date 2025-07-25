@@ -1,8 +1,8 @@
-cmake_minimum_required(VERSION 3.25)
+cmake_minimum_required(VERSION 3.12)
 project(DeferredTest LANGUAGES NONE)
 
 # Include Prerequisite module
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../../../../dist/cmake")
+list(APPEND CMAKE_MODULE_PATH "${PREREQUISITE_MODULE_DIR}")
 include(Prerequisite)
 
 # Test: Simple deferred prerequisite that uses CMake for cross-platform compatibility
