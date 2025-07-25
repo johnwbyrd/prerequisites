@@ -34,8 +34,7 @@ function(add_prerequisite_test TEST_NAME)
         COMMAND ${CMAKE_COMMAND}
             ${APT_CONFIG_ARGS}
             -DPREREQUISITE_MODULE_DIR=${PREREQUISITE_MODULE_DIR}
-            -S "${CMAKE_CURRENT_SOURCE_DIR}/${TEST_NAME}"
-            -B "${TEST_DIR}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/${TEST_NAME}"
         WORKING_DIRECTORY "${TEST_DIR}"
     )
     
