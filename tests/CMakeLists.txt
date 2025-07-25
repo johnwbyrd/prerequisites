@@ -56,7 +56,6 @@ function(add_prerequisite_test TEST_NAME)
             NAME ${TEST_NAME}_build
             COMMAND ${CMAKE_COMMAND}
                 --build "${TEST_DIR}"
-                --verbose
                 ${APT_COMMAND}
             WORKING_DIRECTORY "${TEST_DIR}"
         )
