@@ -29,8 +29,9 @@ jobs:
     - name: Verify CMake version
       run: cmake --version
       
-    - name: Configure project
-      run: cmake -S . -B build
-      
-    - name: Run test suite
-      run: ctest --test-dir build --output-on-failure --parallel 2
+    - name: Configure and test
+      run: |
+        mkdir build
+        cd build
+        cmake ..
+        ctest --output-on-failure --parallel 2
