@@ -237,7 +237,7 @@ Functions
 # Can be changed in one place to avoid namespace collisions
 set(_PREREQUISITE_PREFIX "_PREREQUISITE")
 
-# Debug flag - set to TRUE to enable debug messages
+# Debug flag - set to TRUE to enable debug messages  
 set(_PREREQUISITE_DEBUG FALSE CACHE BOOL
     "Enable Prerequisites debug messages")
 
@@ -564,7 +564,7 @@ endfunction()
 
 # Execute a step immediately during configure time
 function(_Prerequisite_Execute_Immediate name step command working_dir
-    stamp_file)
+    post_stamp_file)
   _Prerequisite_Substitute_Variables("${command}" substituted_command)
   
   message(STATUS "Prerequisite ${name}: Running ${step} step immediately")
@@ -575,47 +575,70 @@ function(_Prerequisite_Execute_Immediate name step command working_dir
   )
   
   if(NOT result EQUAL 0)
-    # Clean up stamps for this and subsequent steps
+    # Clean up post-stamps for this and subsequent steps (two-stamp architecture)
+    get_property(stamp_dir GLOBAL PROPERTY
+        ${_PREREQUISITE_PREFIX}_${name}_STAMP_DIR)
+    set(cleanup_started FALSE)
     foreach(cleanup_step ${_PREREQUISITE_STEPS})
-      get_property(stamp_dir GLOBAL PROPERTY
-          ${_PREREQUISITE_PREFIX}_${name}_STAMP_DIR)
-      file(REMOVE "${stamp_dir}/${name}-${cleanup_step}")
       if(cleanup_step STREQUAL step)
-        break()
+        set(cleanup_started TRUE)
+      endif()
+      if(cleanup_started)
+        file(REMOVE "${stamp_dir}/${name}-${cleanup_step}-post")
+        file(REMOVE "${stamp_dir}/${name}-${cleanup_step}-pre")
       endif()
     endforeach()
-    message(FATAL_ERROR "Prerequisite ${name}: ${step} step failed")
+    message(FATAL_ERROR "Prerequisite ${name}: Failed to ${step}. Build process interrupted during configuration.")
   endif()
   
-  # Create stamp file
-  file(TOUCH "${stamp_file}")
+  # Create post-stamp file only on success
+  file(TOUCH "${post_stamp_file}")
 endfunction()
 
-# Create build-time target for a step
-function(_Prerequisite_Create_Build_Target name step command working_dir stamp_file dependencies)
+# Create build-time target for a step using two-stamp architecture
+function(_Prerequisite_Create_Build_Target name step command working_dir post_stamp_file dependencies)
   string(TOLOWER "${step}" step_lower)
+  
+  # Two-stamp architecture: pre-stamp marks dependencies ready, post-stamp marks execution complete
+  get_property(STAMP_DIR GLOBAL PROPERTY ${_PREREQUISITE_PREFIX}_${name}_STAMP_DIR)
+  set(pre_stamp_file "${STAMP_DIR}/${name}-${step}-pre")
+  
+  # Debug: Show what we're declaring to the build system
+  _Prerequisite_Debug("_Prerequisite_Create_Build_Target(${name}, ${step}) - Two-stamp architecture")
+  _Prerequisite_Debug("  PRE_STAMP: ${pre_stamp_file}")
+  _Prerequisite_Debug("  POST_STAMP: ${post_stamp_file}")
+  _Prerequisite_Debug("  DEPENDS: ${dependencies}")
+  _Prerequisite_Debug("  WORKING_DIRECTORY: ${working_dir}")
   
   # Substitute variables in command for build-time execution
   _Prerequisite_Substitute_Variables("${command}" substituted_command)
   
-  # Create the custom command that produces a stamp file
+  # Step 1: Create pre-stamp when dependencies are satisfied
   add_custom_command(
-    OUTPUT "${stamp_file}"
-    COMMAND ${substituted_command}
-    COMMAND ${CMAKE_COMMAND} -E touch "${stamp_file}"
+    OUTPUT "${pre_stamp_file}"
+    COMMAND ${CMAKE_COMMAND} -E touch "${pre_stamp_file}"
     DEPENDS ${dependencies}
+    COMMENT "Prerequisite ${name}: Dependencies ready for ${step} step"
+  )
+  
+  # Step 2: Create post-stamp when step execution completes successfully
+  add_custom_command(
+    OUTPUT "${post_stamp_file}"
+    COMMAND ${substituted_command}
+    COMMAND ${CMAKE_COMMAND} -E touch "${post_stamp_file}"
+    DEPENDS "${pre_stamp_file}"
     WORKING_DIRECTORY "${working_dir}"
     COMMENT "Prerequisite ${name}: Running ${step} step"
   )
   
-  # Create named target that depends on the stamp file
+  # Create named target that depends on the post-stamp file
   add_custom_target(${name}-${step_lower}
-    DEPENDS "${stamp_file}"
+    DEPENDS "${post_stamp_file}"
   )
   
-  # Create force target (always removes stamp then runs)
+  # Create force target (removes post-stamp to force rebuild)
   add_custom_target(${name}-force-${step_lower}
-    COMMAND ${CMAKE_COMMAND} -E remove "${stamp_file}"
+    COMMAND ${CMAKE_COMMAND} -E remove -f "${post_stamp_file}"
     COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target ${name}-${step_lower}
     COMMENT "Prerequisite ${name}: Force ${step} step"
   )
@@ -636,8 +659,8 @@ function(_Prerequisite_Process_Single_Step name step is_configure_time previous_
   get_property(STAMP_DIR GLOBAL PROPERTY ${_PREREQUISITE_PREFIX}_${name}_STAMP_DIR)
   get_property(BINARY_DIR GLOBAL PROPERTY ${_PREREQUISITE_PREFIX}_${name}_BINARY_DIR)
   
-  # Set up stamp file path
-  set(stamp_file "${STAMP_DIR}/${name}-${step}")
+  # Set up post-stamp file path (two-stamp architecture)
+  set(post_stamp_file "${STAMP_DIR}/${name}-${step}-post")
   
   # Process file dependencies
   get_property(step_depends GLOBAL PROPERTY ${_PREREQUISITE_PREFIX}_${name}_${step}_DEPENDS)
@@ -661,15 +684,15 @@ function(_Prerequisite_Process_Single_Step name step is_configure_time previous_
     set(needs_to_run FALSE)
     
     if(uses_file_deps)
-      # Compare file timestamps with stamp file
+      # Compare file timestamps with post-stamp file
       _Prerequisite_Debug("  Using file dependencies: ${resolved_files}")
-      if(NOT EXISTS "${stamp_file}")
-        _Prerequisite_Debug("  Stamp file missing: ${stamp_file}")
+      if(NOT EXISTS "${post_stamp_file}")
+        _Prerequisite_Debug("  Post-stamp file missing: ${post_stamp_file}")
         set(needs_to_run TRUE)
       else()
-        # Check if any dependency files are newer than stamp
+        # Check if any dependency files are newer than post-stamp
         foreach(dep_file ${resolved_files})
-          if(EXISTS "${dep_file}" AND "${dep_file}" IS_NEWER_THAN "${stamp_file}")
+          if(EXISTS "${dep_file}" AND "${dep_file}" IS_NEWER_THAN "${post_stamp_file}")
             _Prerequisite_Debug("  Dependency file newer: ${dep_file}")
             set(needs_to_run TRUE)
             break()
@@ -677,17 +700,21 @@ function(_Prerequisite_Process_Single_Step name step is_configure_time previous_
         endforeach()
       endif()
     else()
-      # Check if stamp file exists
+      # Check if post-stamp file exists
       _Prerequisite_Debug("  Using stamp-only dependencies")
-      if(NOT EXISTS "${stamp_file}")
-        _Prerequisite_Debug("  Stamp file missing: ${stamp_file}")
+      if(NOT EXISTS "${post_stamp_file}")
+        _Prerequisite_Debug("  Post-stamp file missing: ${post_stamp_file}")
         set(needs_to_run TRUE)
       endif()
     endif()
     
     _Prerequisite_Debug("  needs_to_run=${needs_to_run}")
     if(needs_to_run)
-      _Prerequisite_Execute_Immediate(${name} ${step} "${step_command}" "${BINARY_DIR}" "${stamp_file}")
+      # Create pre-stamp before execution
+      set(pre_stamp_file "${STAMP_DIR}/${name}-${step}-pre")
+      file(TOUCH "${pre_stamp_file}")
+      
+      _Prerequisite_Execute_Immediate(${name} ${step} "${step_command}" "${BINARY_DIR}" "${post_stamp_file}")
     endif()
   else()
     _Prerequisite_Debug("  ${step} step: build-time only")
@@ -697,15 +724,19 @@ function(_Prerequisite_Process_Single_Step name step is_configure_time previous_
   set(step_deps "")
   if(previous_stamp_file)
     list(APPEND step_deps "${previous_stamp_file}")
+    _Prerequisite_Debug("  Adding previous post-stamp to deps: ${previous_stamp_file}")
   endif()
   if(uses_file_deps)
     list(APPEND step_deps ${resolved_files})
+    _Prerequisite_Debug("  Adding file deps: ${resolved_files}")
   endif()
   
-  _Prerequisite_Create_Build_Target(${name} ${step} "${step_command}" "${BINARY_DIR}" "${stamp_file}" "${step_deps}")
+  _Prerequisite_Debug("  Final step_deps for ${step}: ${step_deps}")
   
-  # Return the stamp file for next iteration
-  set(${out_stamp_file} "${stamp_file}" PARENT_SCOPE)
+  _Prerequisite_Create_Build_Target(${name} ${step} "${step_command}" "${BINARY_DIR}" "${post_stamp_file}" "${step_deps}")
+  
+  # Return the post-stamp file for next iteration
+  set(${out_stamp_file} "${post_stamp_file}" PARENT_SCOPE)
 endfunction()
 
 # Process each step in order (DOWNLOAD, UPDATE, CONFIGURE, BUILD, INSTALL, TEST)

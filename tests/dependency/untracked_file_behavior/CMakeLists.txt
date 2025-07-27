@@ -11,9 +11,12 @@ file(WRITE "${SOURCE_DIR}/tracked.c" "// Tracked file")
 file(WRITE "${SOURCE_DIR}/untracked.h" "// Untracked header file") 
 file(WRITE "${SOURCE_DIR}/untracked.txt" "// Untracked text file")
 
+# Include counter file utilities
+include("${PREREQUISITE_TEST_UTILS_DIR}/counter_file.cmake")
+
 # Track execution count
 set(COUNT_FILE "${CMAKE_CURRENT_BINARY_DIR}/build_count.txt")
-file(WRITE "${COUNT_FILE}" "0")
+init_counter_file("${COUNT_FILE}")
 
 # Test: Untracked file behavior
 # Question: Do untracked files (not matching glob) correctly NOT trigger rebuilds?

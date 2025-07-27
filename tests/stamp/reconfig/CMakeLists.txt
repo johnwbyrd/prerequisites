@@ -4,12 +4,17 @@ cmake_minimum_required(VERSION 3.12)
 list(APPEND CMAKE_MODULE_PATH "${PREREQUISITE_MODULE_DIR}")
 include(Prerequisite)
 
+# Include counter file utilities
+include("${PREREQUISITE_TEST_UTILS_DIR}/counter_file.cmake")
+
 # This test checks that reconfiguration respects existing stamps
 set(EXECUTION_MARKER "${CMAKE_CURRENT_BINARY_DIR}/execution_marker.txt")
 
 # Create marker file that tracks total executions across reconfigurations
 if(NOT EXISTS "${EXECUTION_MARKER}")
-    file(WRITE "${EXECUTION_MARKER}" "0")
+    init_counter_file("${EXECUTION_MARKER}")
+else()
+    message(STATUS "COUNTER EXISTS: Using existing ${EXECUTION_MARKER}")
 endif()
 
 # Read current execution count

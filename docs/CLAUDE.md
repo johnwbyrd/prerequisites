@@ -122,12 +122,232 @@ endif()
 
 This is the proven, battle-tested approach used by millions of CMake projects. Do not reinvent archive handling or download mechanisms.
 
+### Stamp File Architecture Analysis (July 2025)
+
+**Problem Identified**: Windows builds fail because current single-stamp architecture creates semantic conflict with CMake's `add_custom_command(OUTPUT ...)` requirements.
+
+**Root Cause**: The system pre-creates stamp files during configure-time execution, then declares those same files as OUTPUT in build-time custom commands. Visual Studio generators are stricter than Make generators about OUTPUT semantics - they assume that if you declare OUTPUT, you must run the command to create it properly, regardless of whether the file already exists.
+
+**Why Single-Stamp Approach Is Insufficient:**
+1. **Semantic conflict**: Cannot declare pre-existing files as OUTPUT without violating CMake's command semantics
+2. **Generator differences**: Works on Linux/Make but fails on Windows/Visual Studio due to stricter OUTPUT interpretation  
+3. **No clean solution**: Wrapper scripts that check timestamps add performance overhead and duplicate CMake's dependency logic
+
+**Proposed Two-Stamp Architecture:**
+
+**Stamp Definitions:**
+- **Pre-stamp**: "Prerequisites satisfied, step ready to execute". Created when all dependencies (previous post-stamp + file dependencies) are satisfied. Marks the transition from "waiting for dependencies" to "ready to run".
+- **Post-stamp**: "Step execution completed successfully". Created only when the actual step command completes successfully. This is what subsequent steps depend on.
+
+**Configure Time Logic:**
+1. Check if post-stamp exists and is newer than dependencies
+2. If not, run the step immediately via `execute_process()`
+3. Create pre-stamp before execution, create post-stamp on success
+
+**Build Time Logic:**
+```cmake
+# Pre-stamp created when dependencies are ready
+add_custom_command(
+    OUTPUT pre_stamp
+    DEPENDS prev_post_stamp file_deps
+    COMMAND ${CMAKE_COMMAND} -E touch pre_stamp
+    COMMENT "Prerequisites ready for step"
+)
+
+# Post-stamp created when step execution completes
+add_custom_command(
+    OUTPUT post_stamp 
+    DEPENDS pre_stamp
+    COMMAND wrapper_script
+    COMMENT "Executing step"
+)
+```
+
+**Wrapper Script Logic:**
+1. Run actual step command
+2. If success: create post-stamp
+3. If failure: exit with error (pre-stamp remains, post-stamp not created)
+
+**Dependency Chain:**
+```
+file_deps + prev_post_stamp → pre_stamp → post_stamp → next_pre_stamp → ...
+```
+
+**Stamp State Meanings:**
+- No stamps: Dependencies not yet satisfied
+- Pre-stamp only: Dependencies satisfied, but step execution failed or incomplete
+- Both stamps: Step completed successfully
+
+**Why This Works:**
+- Clear dependency chain with no missing dependencies
+- Pre-stamp bridges "dependencies ready" to "execution complete"
+- Post-stamp is always created by custom command, never pre-existing
+- Each stamp has a distinct purpose in the build graph
+- Failed executions leave diagnostic state (pre-stamp without post-stamp)
+
+**Why Two-Stamp Approach Should Work:**
+1. **No semantic conflict**: Both stamps are always created by custom commands, never pre-existing
+2. **Complete dependency chain**: Pre-stamp bridges dependencies to execution, post-stamp bridges execution to next step
+3. **Clear failure diagnostics**: Pre-stamp without post-stamp indicates execution failed after dependencies were satisfied
+4. **No missing dependency issues**: Each custom command depends only on files that will be created by previous commands
+5. **Atomic execution phases**: Dependency resolution (→ pre-stamp) separate from command execution (→ post-stamp)
+6. **Configure-time authority**: Reconfigure invalidates previous state (documented limitation)
+
+**Design Analysis and Performance Implications:**
+
+**Command Count Impact:**
+- Current: 1 custom command per step (6 total for typical prerequisite)
+- Two-stamp: 2 custom commands per step (12 total for typical prerequisite)
+- First command: Simple `cmake -E touch` operation (minimal overhead)
+- Second command: Actual step execution (unchanged cost)
+
+**Runtime Performance:**
+- **Normal operation**: Touch commands run at most once when dependencies change
+- **Incremental builds**: Both commands skip due to up-to-date timestamps
+- **Additional overhead**: One extra timestamp check per step during build planning
+- **File I/O**: One additional stamp file per step (minimal filesystem impact)
+
+**When Touch Commands Execute:**
+- Fresh builds: Touch runs once to create pre-stamp, then skipped forever
+- Dependency changes: Touch runs once to update pre-stamp timestamp
+- Failed executions: Touch skipped (pre-stamp already exists)
+- Successful builds: Touch skipped (pre-stamp up-to-date)
+
+**Theoretical vs Practical Impact:**
+- **Build system generation**: ~2x more rules to process (typically milliseconds)
+- **Daily development**: Touch commands rarely execute after initial build
+- **CI/CD builds**: One-time cost during initial dependency resolution
+
+**Remaining Concerns:**
+- Increased complexity in build rule generation
+- Cross-platform file operation reliability  
+- Double the stamp files for debugging/troubleshooting
+
+**Decision**: Proceed with two-stamp implementation as it addresses the fundamental Windows compatibility issue while maintaining architectural integrity.
+
+### Two-Stamp Implementation Status (July 2025)
+
+**COMPLETED**: Two-stamp architecture implementation in cmake/Prerequisite.cmake
+- Modified `_Prerequisite_Create_Build_Target()` to create two custom commands
+- Updated `_Prerequisite_Process_Single_Step()` to use post-stamp files  
+- Updated `_Prerequisite_Execute_Immediate()` for proper failure handling
+- Fixed one test (`stamp/missing`) for new stamp naming convention
+
+**CRITICAL ISSUE ANALYSIS COMPLETED**: Configure-time detection logic is fundamentally flawed
+
+During Ubuntu testing of the two-stamp implementation, a serious issue was discovered with the configure-time detection logic in `_Prerequisite_Is_Configure_Time()`. The debug output shows:
+
+```
+CMAKE_PROJECT_NAME='ImmediateTest' 
+CMAKE_SOURCE_DIR='/mnt/c/git/prerequisites/tests/simple/immediate' 
+CMAKE_CURRENT_SOURCE_DIR='/mnt/c/git/prerequisites/tests/simple/immediate'
+-> returning FALSE (build time: project() called in this directory)
+```
+
+**Root Cause Identified**: CMake's parsing vs execution model makes `CMAKE_PROJECT_NAME` detection unreliable.
+
+**The Real Problem**: CMake parses the entire CMakeLists.txt file (including `project()` calls) before executing any commands. This sets `CMAKE_PROJECT_NAME` during parsing, not execution, making it impossible to detect file order through variable inspection.
+
+**File Order Analysis**:
+1. Line 18: `Prerequisite_Add(immediate ...)` ← Correct position before project()
+2. Line 35: `project(ImmediateTest LANGUAGES NONE)` ← Processed during parsing, sets CMAKE_PROJECT_NAME
+
+**Execution Model Clarification**:
+- `Prerequisite_Add()` **always** runs at configure time (during `cmake` command execution)
+- Build-time execution happens via `add_custom_command()` shell commands, not CMake code
+- Detection should distinguish "immediate execution needed" vs "defer to build targets"
+- **Both immediate execution AND build target creation should happen during configure time**
+
+**Key Insight from Research**: 
+- Configure-time: Running `cmake` command - `execute_process()` available
+- Build-time: Running `make`/`ninja`/`msbuild` - only shell commands via `add_custom_command()`
+- If we're executing CMake code at all, we're at configure time!
+
+**Proposed Solution**: Simplify detection to focus on the actual use case:
+1. **Always create build targets** (for development workflow)
+2. **Default to immediate execution** (primary use case: bootstrapping before project())
+3. **Optionally warn about potential misuse** (when project() appears to have been called)
+
+**Implementation Strategy**:
+```cmake
+function(_Prerequisite_Is_Configure_Time out_var)
+  # Default to immediate execution (primary bootstrapping use case)
+  set(execute_immediately TRUE)
+  
+  # Optional warning for potential misuse
+  if(CMAKE_PROJECT_NAME AND "${CMAKE_SOURCE_DIR}" STREQUAL "${CMAKE_CURRENT_SOURCE_DIR}")
+    message(WARNING "Prerequisite_Add() may be called after project(). "
+                    "For bootstrapping, Prerequisites should appear before project().")
+  endif()
+  
+  set(${out_var} ${execute_immediately} PARENT_SCOPE)
+endfunction()
+```
+
+**Investigation Results - Alternative Detection Methods**:
+
+**CMAKE_ROLE Property Analysis**: 
+- `CMAKE_ROLE` property (added in CMake 3.14) indicates execution mode ("PROJECT", "SCRIPT", etc.)
+- Provides reliable context detection but doesn't indicate whether `project()` has been called
+- `CMAKE_ROLE` would be "PROJECT" throughout entire CMakeLists.txt processing
+
+**PROJECT_NAME vs CMAKE_PROJECT_NAME Testing**:
+Tested hypothesis that `PROJECT_NAME` might have different timing behavior than `CMAKE_PROJECT_NAME`:
+
+```
+Test Results (both variables identical timing):
+BEFORE project(): CMAKE_PROJECT_NAME='' | PROJECT_NAME=''
+AFTER project():  CMAKE_PROJECT_NAME='TestProject' | PROJECT_NAME='TestProject'
+```
+
+**Conclusion**: `PROJECT_NAME` suffers from the same parsing vs execution timing issue as `CMAKE_PROJECT_NAME`. Both variables are set during CMake's parsing phase regardless of command execution order.
+
+**Two-Phase Processing Analysis**:
+The provided example functions showed a sophisticated approach with:
+- Split responsibilities (pre-project basic operations, post-project full features)
+- Deferred processing pattern with `process_deferred_prerequisites()`
+- However, the detection logic still relies on `PROJECT_NAME` which has the same timing issues
+
+**Root Cause Confirmed**: Any detection based on CMake variables that get set during parsing (CMAKE_PROJECT_NAME, PROJECT_NAME) will be unreliable for determining intended execution order in files that contain both `Prerequisite_Add()` and `project()` calls.
+
+**Final Recommended Solution**: Remove detection entirely and always execute immediately + create targets.
+
+**Implementation Strategy**:
+```cmake
+function(_Prerequisite_Is_Configure_Time out_var)
+  # Simplified: Always execute immediately and always create targets
+  # This matches the primary use case (bootstrapping) and eliminates detection issues
+  set(${out_var} TRUE PARENT_SCOPE)
+endfunction()
+```
+
+**Rationale**:
+1. **Matches primary use case**: Building toolchain components before `project()` requires immediate execution
+2. **Eliminates detection complexity**: No more unreliable parsing vs execution timing issues
+3. **Preserves dual functionality**: Both immediate execution (bootstrapping) and build targets (development) happen
+4. **Maintains backward compatibility**: Existing code continues to work
+5. **Fixes test suite**: All tests expect immediate execution and should pass
+
+**Test Suite Fix Strategy**:
+- No test file changes needed - tests expect immediate execution
+- Implementation change only: always return TRUE from detection function
+- Verify all 26 tests pass with simplified logic
+- Test Windows compatibility with working immediate execution
+
+**Current Test Status**: 6/26 tests failing on Ubuntu, ready to fix with simplified detection
+
+**Priority**: Implement simplified detection to enable Windows testing of two-stamp architecture
+
 ### Files to Examine First
-- `dist/cmake/Prerequisite.cmake` - Main implementation (functional but incomplete)
-- `tests/prerequisite/` - Working test suite demonstrating functionality  
-- `doc/prerequisites.md` - Complete design specification
-- `doc/todo.md` - Updated status and remaining work
+- `cmake/Prerequisite.cmake` - Main implementation (functional but configure-time detection broken)
+- `tests/` - Test suite revealing configure-time detection issues
+- `docs/prerequisites.md` - Complete design specification
+- `docs/todo.md` - Updated status and remaining work
 
 ## Immediate Next Steps
 
-IMMEDIATELY READ EVERY SINGLE .MD, .CMAKE, and .TXT FILE IN THE PROJECT, COMPLETELY.  You will be checked on your knowledge of the contents on these files.  If you are not able to answer questions about the contents of these files, your instance will be deleted and you will be replaced with another instance that actually reads these files.
+IMMEDIATELY READ EVERY SINGLE .MD, .CMAKE, and .TXT FILE IN THE PROJECT, COMPLETELY.  You may ignore files in the build directories, but you may NOT ignore files in the tests/ and cmake/ directories.  You will be checked on your knowledge of the contents on these files.  If you are not able to answer questions about the contents of these files, your instance will be deleted and you will be replaced with another instance that actually reads these files.
+
+Put all these items immediately on your todo list, and complete them all before returning to communicate with the user.
+
+DO NOT CLAIM YOU HAVE READ THESE FILES, UNTIL YOU HAVE READ THEM.  IF YOU DO, YOU WILL BE DELETED.

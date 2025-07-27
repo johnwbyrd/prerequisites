@@ -8,10 +8,13 @@ include(Prerequisite)
 set(TRACK_DIR "${CMAKE_CURRENT_BINARY_DIR}/execution_count")
 file(MAKE_DIRECTORY "${TRACK_DIR}")
 
+# Include counter file utilities
+include("${PREREQUISITE_TEST_UTILS_DIR}/counter_file.cmake")
+
 # Initialize counter files to 0
-file(WRITE "${TRACK_DIR}/download_count" "0")
-file(WRITE "${TRACK_DIR}/build_count" "0")
-file(WRITE "${TRACK_DIR}/install_count" "0")
+init_counter_file("${TRACK_DIR}/download_count")
+init_counter_file("${TRACK_DIR}/build_count")
+init_counter_file("${TRACK_DIR}/install_count")
 
 # Commands that increment counters - if run twice, count will be > 1
 Prerequisite_Add(

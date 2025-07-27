@@ -9,9 +9,12 @@ set(SOURCE_DIR "${CMAKE_CURRENT_BINARY_DIR}/sources")
 file(MAKE_DIRECTORY "${SOURCE_DIR}")
 file(WRITE "${SOURCE_DIR}/test.c" "// Initial version")
 
+# Include counter file utilities
+include("${PREREQUISITE_TEST_UTILS_DIR}/counter_file.cmake")
+
 # Track execution count
 set(COUNT_FILE "${CMAKE_CURRENT_BINARY_DIR}/execution_count")
-file(WRITE "${COUNT_FILE}" "0")
+init_counter_file("${COUNT_FILE}")
 
 # Test prerequisite with file dependencies that tracks executions
 Prerequisite_Add(

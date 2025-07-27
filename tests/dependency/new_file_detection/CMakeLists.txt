@@ -9,9 +9,12 @@ set(SOURCE_DIR "${CMAKE_CURRENT_BINARY_DIR}/src")
 file(MAKE_DIRECTORY "${SOURCE_DIR}")
 file(WRITE "${SOURCE_DIR}/existing.c" "// Existing file")
 
+# Include counter file utilities
+include("${PREREQUISITE_TEST_UTILS_DIR}/counter_file.cmake")
+
 # Track execution count
 set(COUNT_FILE "${CMAKE_CURRENT_BINARY_DIR}/build_count.txt")
-file(WRITE "${COUNT_FILE}" "0")
+init_counter_file("${COUNT_FILE}")
 
 # Test: New file detection behavior
 # Question: Do file dependencies work with newly added files that match glob patterns?

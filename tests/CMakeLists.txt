@@ -11,6 +11,7 @@ set(PREREQUISITE_TEST_BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}")
 
 # Set up module path for tests
 set(PREREQUISITE_MODULE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../cmake" CACHE PATH "Path to Prerequisite module directory")
+set(PREREQUISITE_TEST_UTILS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include" CACHE PATH "Path to test utilities directory")
 
 # Function to add a prerequisite test with process isolation
 function(add_prerequisite_test TEST_NAME)
@@ -34,6 +35,7 @@ function(add_prerequisite_test TEST_NAME)
         COMMAND ${CMAKE_COMMAND}
             ${APT_CONFIG_ARGS}
             -DPREREQUISITE_MODULE_DIR=${PREREQUISITE_MODULE_DIR}
+            -DPREREQUISITE_TEST_UTILS_DIR=${PREREQUISITE_TEST_UTILS_DIR}
             -D_PREREQUISITE_DEBUG=TRUE
             --debug-output
             "${CMAKE_CURRENT_SOURCE_DIR}/${TEST_NAME}"

@@ -9,11 +9,14 @@ set(SOURCE_DIR "${CMAKE_CURRENT_BINARY_DIR}/src")
 file(MAKE_DIRECTORY "${SOURCE_DIR}")
 file(WRITE "${SOURCE_DIR}/source.c" "// Source file")
 
+# Include counter file utilities
+include("${PREREQUISITE_TEST_UTILS_DIR}/counter_file.cmake")
+
 # Track execution counts for both approaches
 set(FILE_COUNT "${CMAKE_CURRENT_BINARY_DIR}/file_count.txt")
 set(STAMP_COUNT "${CMAKE_CURRENT_BINARY_DIR}/stamp_count.txt")
-file(WRITE "${FILE_COUNT}" "0")
-file(WRITE "${STAMP_COUNT}" "0")
+init_counter_file("${FILE_COUNT}")
+init_counter_file("${STAMP_COUNT}")
 
 # Test: Direct comparison of file vs stamp dependency behavior
 # Question: What are the exact behavioral differences?

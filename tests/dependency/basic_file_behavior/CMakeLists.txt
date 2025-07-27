@@ -9,9 +9,12 @@ set(SOURCE_DIR "${CMAKE_CURRENT_BINARY_DIR}/src")
 file(MAKE_DIRECTORY "${SOURCE_DIR}")
 file(WRITE "${SOURCE_DIR}/main.c" "// Initial main.c content")
 
+# Include counter file utilities
+include("${PREREQUISITE_TEST_UTILS_DIR}/counter_file.cmake")
+
 # Track execution count
 set(COUNT_FILE "${CMAKE_CURRENT_BINARY_DIR}/build_count.txt")
-file(WRITE "${COUNT_FILE}" "0")
+init_counter_file("${COUNT_FILE}")
 
 # Test: Basic file dependency behavior
 # Question: Do file dependencies trigger rebuilds when tracked files change?
