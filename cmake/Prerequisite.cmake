@@ -309,76 +309,6 @@ function(_Prerequisite_Debug_Dump name)
   message(STATUS "=== End Properties for ${name} ===")
 endfunction()
 
-# Determine if we're running at configure time (before project()) vs build time
-# (after project())
-#
-# This function solves a critical problem in the prerequisites system:
-# distinguishing between configure-time execution (when prerequisites should run
-# immediately) and build-time execution (when prerequisites should create CMake
-# targets for later execution).
-#
-# The prerequisites system needs to support dual execution modes:
-# 1. CONFIGURE TIME: When Prerequisite_Add() is called BEFORE project(),
-#    prerequisites must execute immediately to bootstrap tools (like compilers)
-#    that project() will need.
-# 2. BUILD TIME: When Prerequisite_Add() is called AFTER project(),
-#    prerequisites should create normal CMake targets that execute during the
-#    build phase.
-#
-# THE DETECTION APPROACH:
-# The function uses a two-stage check to handle both standalone and nested
-# CMake contexts:
-#
-# 1. First, check if CMAKE_PROJECT_NAME is empty - this handles the common case
-#    where no project() has been called in the current execution context.
-#
-# 2. Second, for nested contexts (like CTest), check if CMAKE_SOURCE_DIR differs
-#    from CMAKE_CURRENT_SOURCE_DIR - this indicates we're in a subdirectory
-#    that hasn't called project() yet, even if a parent process has.
-#
-# EXECUTION SCENARIOS:
-#
-# Scenario 1: Standalone CMake execution
-#   cmake_minimum_required(VERSION 3.12)
-#   Prerequisite_Add(my_prereq ...)  # <- CMAKE_PROJECT_NAME="" -> CONFIGURE
-#   project(MyProject)                # <- Sets CMAKE_PROJECT_NAME
-#   Prerequisite_Add(my_prereq2 ...)  # <- CMAKE_PROJECT_NAME set -> BUILD TIME
-#
-# Scenario 2: CTest execution (nested context)
-#   Parent process: project(TestRunner) -> sets CMAKE_PROJECT_NAME="TestRunner"
-#   Child process spawned by CTest:
-#     cmake_minimum_required(VERSION 3.12)
-#     # CMAKE_PROJECT_NAME="" (child process starts with empty project name)
-#     # CMAKE_SOURCE_DIR != CMAKE_CURRENT_SOURCE_DIR (different directories)
-#     Prerequisite_Add(test_prereq ...) # <- Either condition -> CONFIGURE TIME
-#     project(MyTest)                   # <- Sets CMAKE_PROJECT_NAME for context
-#     Prerequisite_Add(test_prereq2 ...) # <- Same directory -> BUILD TIME
-#
-# This approach correctly handles both standalone CMake execution and nested
-# contexts like testing frameworks, ensuring prerequisites run immediately
-# when needed for bootstrapping and defer to build-time targets otherwise.
-#
-# Returns TRUE if no project() has been called in the current context
-# (configure time)
-# Returns FALSE if project() has been called in the current context
-# (build time)
-function(_Prerequisite_Is_Configure_Time out_var)
-  _Prerequisite_Debug("_Prerequisite_Is_Configure_Time: CMAKE_PROJECT_NAME='${CMAKE_PROJECT_NAME}' CMAKE_SOURCE_DIR='${CMAKE_SOURCE_DIR}' CMAKE_CURRENT_SOURCE_DIR='${CMAKE_CURRENT_SOURCE_DIR}'")
-  
-  # Check if CMAKE_PROJECT_NAME is set - this indicates project() has been
-  # called in this context. In nested contexts, we need to check if the
-  # current source directory is the same as the top-level source directory.
-  if(NOT CMAKE_PROJECT_NAME OR CMAKE_PROJECT_NAME STREQUAL "")
-    _Prerequisite_Debug("  -> returning TRUE (configure time: no project() called - CMAKE_PROJECT_NAME empty)")
-    set(${out_var} TRUE PARENT_SCOPE)
-  elseif(NOT "${CMAKE_SOURCE_DIR}" STREQUAL "${CMAKE_CURRENT_SOURCE_DIR}")
-    _Prerequisite_Debug("  -> returning TRUE (configure time: CMAKE_SOURCE_DIR != CMAKE_CURRENT_SOURCE_DIR)")
-    set(${out_var} TRUE PARENT_SCOPE)
-  else()
-    _Prerequisite_Debug("  -> returning FALSE (build time: project() called in this directory)")
-    set(${out_var} FALSE PARENT_SCOPE)
-  endif()
-endfunction()
 
 # Parse all arguments using cmake_parse_arguments
 # - Extract options like IMMEDIATE, BUILD_ALWAYS
@@ -568,6 +498,10 @@ function(_Prerequisite_Execute_Immediate name step command working_dir
   _Prerequisite_Substitute_Variables("${command}" substituted_command)
   
   message(STATUS "Prerequisite ${name}: Running ${step} step immediately")
+  _Prerequisite_Debug("  POST_STAMP_FILE: ${post_stamp_file}")
+  _Prerequisite_Debug("  WORKING_DIR: ${working_dir}")
+  _Prerequisite_Debug("  COMMAND: ${substituted_command}")
+  
   execute_process(
     COMMAND ${substituted_command}
     WORKING_DIRECTORY "${working_dir}"
@@ -592,7 +526,13 @@ function(_Prerequisite_Execute_Immediate name step command working_dir
   endif()
   
   # Create post-stamp file only on success
+  _Prerequisite_Debug("  Creating post-stamp: ${post_stamp_file}")
   file(TOUCH "${post_stamp_file}")
+  if(EXISTS "${post_stamp_file}")
+    _Prerequisite_Debug("  Post-stamp created successfully")
+  else()
+    _Prerequisite_Debug("  WARNING: Post-stamp creation failed!")
+  endif()
 endfunction()
 
 # Create build-time target for a step using two-stamp architecture
@@ -777,9 +717,9 @@ function(_Prerequisite_Process_Steps name)
 endfunction()
 
 function(Prerequisite_Add name)
-  _Prerequisite_Is_Configure_Time(is_configure_time)
-  _Prerequisite_Debug("Prerequisite_Add(${name}) - is_configure_time=${is_configure_time}")
-  set_property(GLOBAL PROPERTY ${_PREREQUISITE_PREFIX}_${name}_IS_CONFIGURE_TIME "${is_configure_time}")
+  _Prerequisite_Debug("Prerequisite_Add(${name}) - always execute immediately")
+  # Always execute immediately - this is the primary use case for bootstrapping
+  set_property(GLOBAL PROPERTY ${_PREREQUISITE_PREFIX}_${name}_IS_CONFIGURE_TIME TRUE)
   _Prerequisite_Parse_Arguments(${name} ${ARGN})
   _Prerequisite_Setup_Directories(${name})
   _Prerequisite_Process_Steps(${name})
