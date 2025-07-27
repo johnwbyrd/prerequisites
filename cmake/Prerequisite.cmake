@@ -535,6 +535,55 @@ function(_Prerequisite_Execute_Immediate name step command working_dir
   endif()
 endfunction()
 
+# Create a wrapper script that checks stamps and executes commands conditionally
+function(_Prerequisite_Create_Wrapper_Script name step command_list post_stamp_file out_execute_command)
+  # Create wrapper script directory
+  set(wrapper_dir "${CMAKE_BINARY_DIR}/prerequisite-wrappers/${name}")
+  file(MAKE_DIRECTORY "${wrapper_dir}")
+  
+  # Determine script filename and executor based on platform
+  if(WIN32)
+    set(script_file "${wrapper_dir}/${step}-wrapper.bat")
+    set(executor cmd /c)
+  else()
+    set(script_file "${wrapper_dir}/${step}-wrapper.sh")
+    set(executor bash -c)
+  endif()
+  
+  # Convert command list to single command line
+  string(JOIN " " command_line ${command_list})
+  
+  # Generate platform-specific script content (multiline)
+  if(WIN32)
+    set(script_content "@echo off")
+    string(APPEND script_content "\nif exist \"${post_stamp_file}\" exit /b 0")
+    string(APPEND script_content "\n${command_line}")
+    string(APPEND script_content "\nif %errorlevel% neq 0 exit /b %errorlevel%")
+    string(APPEND script_content "\necho. > \"${post_stamp_file}\"")
+  else()
+    set(script_content "#!/bin/bash")
+    string(APPEND script_content "\nif [ -f \"${post_stamp_file}\" ]; then exit 0; fi")
+    string(APPEND script_content "\n${command_line}")
+    string(APPEND script_content "\nif [ $? -ne 0 ]; then exit $?; fi")
+    string(APPEND script_content "\ntouch \"${post_stamp_file}\"")
+  endif()
+  
+  # Convert \n to actual newlines for file writing
+  string(REPLACE "\\n" "\n" script_content "${script_content}")
+  
+  # Write script to file
+  file(WRITE "${script_file}" "${script_content}")
+  
+  # Set execute permissions on Unix
+  if(NOT WIN32)
+    file(CHMOD "${script_file}" PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
+  endif()
+  
+  # Return the execute command with native path format
+  file(TO_NATIVE_PATH "${script_file}" native_script_file)
+  set(${out_execute_command} ${executor} "${native_script_file}" PARENT_SCOPE)
+endfunction()
+
 # Create build-time target for a step using two-stamp architecture
 function(_Prerequisite_Create_Build_Target name step command working_dir post_stamp_file dependencies)
   string(TOLOWER "${step}" step_lower)
@@ -562,10 +611,12 @@ function(_Prerequisite_Create_Build_Target name step command working_dir post_st
   )
   
   # Step 2: Create post-stamp when step execution completes successfully
+  # Create wrapper script to handle stamp checking and command execution
+  _Prerequisite_Create_Wrapper_Script("${name}" "${step}" "${substituted_command}" "${post_stamp_file}" execute_command)
+  
   add_custom_command(
     OUTPUT "${post_stamp_file}"
-    COMMAND ${substituted_command}
-    COMMAND ${CMAKE_COMMAND} -E touch "${post_stamp_file}"
+    COMMAND ${execute_command}
     DEPENDS "${pre_stamp_file}"
     WORKING_DIRECTORY "${working_dir}"
     COMMENT "Prerequisite ${name}: Running ${step} step"

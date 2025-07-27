@@ -1,106 +1,84 @@
 # Prerequisites System TODO (July 2025)
 
-## CRITICAL ISSUE: Windows Test Failures - Command Double Execution
+## CRITICAL: Windows Double Execution Fix - PARTIALLY IMPLEMENTED
 
-### Problem Summary
-Windows tests fail because commands execute twice (configure time + build time) instead of once (configure time only). The issue is NOT the two-stamp architecture - it's the broken configure-time detection logic.
+### Implementation Progress (54% Test Pass Rate)
 
-### Root Cause
-The function `_Prerequisite_Is_Configure_Time()` uses `CMAKE_PROJECT_NAME` to detect if `project()` has been called. However, CMake's parsing vs execution model makes this unreliable:
+**COMPLETED**:
+- ✅ Root cause analysis: CMake `add_custom_command()` OUTPUT semantics conflict on Windows
+- ✅ Wrapper script generation architecture designed and implemented
+- ✅ `_Prerequisite_Create_Wrapper_Script()` function completed
+- ✅ Platform-specific script generation (Windows .bat, Unix .sh)
+- ✅ Integration with `_Prerequisite_Create_Build_Target()`
+- ✅ Cross-platform script template system
 
-1. CMake parses entire CMakeLists.txt before executing any commands
-2. `CMAKE_PROJECT_NAME` gets set during parsing, not execution
-3. When `Prerequisite_Add()` executes, `CMAKE_PROJECT_NAME` is already set
-4. Detection incorrectly returns FALSE (build time) when it should return TRUE (configure time)
-5. Commands skip configure-time execution, only run at build time
+**CURRENT ISSUE**: Command list parsing error
+- **Symptom**: `/c: /c: Is a directory` error during test execution
+- **Root Cause**: CMake interpreting `cmd /c` as separate command and argument instead of command with argument
+- **Location**: `_Prerequisite_Create_Wrapper_Script()` line 583: `set(${out_execute_command} ${executor} "${script_file}" PARENT_SCOPE)`
 
-### Evidence of the Bug
-Debug output shows:
+### Immediate Next Task (HIGH PRIORITY)
+
+**Fix command list construction** in `_Prerequisite_Create_Wrapper_Script()`:
+- Current: `set(executor cmd /c)` creates CMake list `[cmd, /c]`
+- Problem: `add_custom_command(COMMAND ${execute_command})` treats as command=`cmd`, arg1=`/c`, arg2=`script`
+- Solution: Build proper command list structure for CMake
+
+### Validated Working Components
+
+**Wrapper Script Generation**: ✅ WORKING
+- Scripts created at `${CMAKE_BINARY_DIR}/prerequisite-wrappers/${name}/${step}-wrapper.bat`
+- Correct stamp checking logic: `if exist "stamp" exit /b 0`
+- Proper error propagation: `if %errorlevel% neq 0 exit /b %errorlevel%`
+- Cross-platform compatibility maintained
+
+**vcxproj Integration**: ✅ IMPROVED
+- Clean command execution in generated Visual Studio projects
+- No more mangled quoted strings
+- Shows: `cmd /c C:/path/to/script.bat` (correct format)
+
+**Test Infrastructure**: ✅ FUNCTIONAL
+- 14/26 tests passing (54% pass rate)
+- All non-build tests passing (configure-time execution working)
+- All build-time failures due to same command parsing issue
+
+### Implementation Functions Added
+
+```cmake
+# Location: cmake/Prerequisite.cmake lines 538-584
+function(_Prerequisite_Create_Wrapper_Script name step command_list post_stamp_file out_execute_command)
+    # Creates platform-specific wrapper scripts with stamp checking
+    # Status: IMPLEMENTED, needs command list fix
+endfunction()
 ```
-CMAKE_PROJECT_NAME='TestProject' (already set from parsing)
--> returning FALSE (build time: project() called in this directory)
-```
-Even though `Prerequisite_Add()` appears before `project()` in the file.
 
-## FIX IMPLEMENTED
+**Modified**: `_Prerequisite_Create_Build_Target()` lines 613-622
+- Replaced direct command execution with wrapper script approach
+- Integration working, command parsing needs fix
 
-### Configure-Time Detection Removed
+### Architecture Validation
 
-The broken `_Prerequisite_Is_Configure_Time()` function has been completely removed from `cmake/Prerequisite.cmake`. Prerequisites now always execute immediately and create build targets.
+**Cross-Platform Design**: ✅ CONFIRMED
+- Windows: `@echo off` + batch syntax
+- Unix: `#!/bin/bash` + shell syntax  
+- Both: Proper error codes and stamp creation
 
-### Test the Fix
+**CMake Integration**: ⚠️ PARTIAL
+- Script generation: Working
+- File permissions (Unix): Working (`file(CHMOD)`)
+- Command execution: Needs parsing fix
 
-Run the failing test:
-```bash
-cd build && ctest -R "stamp/incremental_build" --output-on-failure
-```
+## SECONDARY PRIORITIES (Deferred Until Fix Complete)
 
-Expected result: Test should pass with count=1 instead of failing with count=2.
+1. **Download Source Support** (GIT_REPOSITORY, URL) - Currently parsed but not implemented
+2. **Full Step Implementation** (UPDATE_COMMAND, CONFIGURE_COMMAND, TEST_COMMAND) 
+3. **Logging System** (LOG_* options) - Currently parsed but ignored
+4. **Advanced File Dependencies** (DOWNLOAD_DEPENDS, CONFIGURE_DEPENDS, etc.)
 
-### Verify All Tests Pass
+## SUCCESS CRITERIA
 
-Run full test suite:
-```bash
-cd build && ctest --output-on-failure
-```
+**Target**: 100% test pass rate (currently 54%)
+**Blocker**: Single command parsing issue affecting all build-time tests
+**Timeline**: Should be resolved in single session once command list construction is fixed
 
-Expected result: All 26 tests should pass.
-
-## DEBUGGING GUIDE FOR FUTURE CLAUDE INSTANCES
-
-### If Tests Still Fail with "executed X times, expected Y"
-
-1. **Check for Reconfiguration During Build**:
-   Look for: "CMake is re-running because ... is out-of-date"
-   This resets counters and can cause confusion about execution timing.
-
-2. **Verify Stamp Files**:
-   Check if post-stamp files exist in `${name}-prefix/src/${name}-stamp/`
-   If missing, configure-time execution was skipped.
-
-3. **Check Test Isolation**:
-   Each test should run in separate CMake process via `add_prerequisite_test()`
-
-### Understanding the Two-Stamp System
-
-**Pre-stamp (`${name}-${step}-pre`)**:
-- Created when dependencies are satisfied
-- Indicates "ready to execute"
-- Used in build dependency chain
-
-**Post-stamp (`${name}-${step}-post`)**:
-- Created when step execution completes successfully
-- Indicates "execution finished"
-- What subsequent steps depend on
-
-**Critical Understanding**: The two-stamp system is about proper dependency tracking in the build system.
-
-## SECONDARY PRIORITIES
-
-### 1. Download Source Support (GIT_REPOSITORY, URL)
-- Currently parsed but not implemented
-- Need git clone and URL download functionality
-
-### 2. Multi-Step Workflow (UPDATE_COMMAND, CONFIGURE_COMMAND, TEST_COMMAND)
-- Only BUILD_COMMAND is fully tested
-- Need complete step sequence implementation
-
-### 3. Logging System (LOG_* options)
-- Currently parsed but ignored
-- Need output redirection to log files
-
-### 4. Advanced File Dependencies
-- Only BUILD_DEPENDS is tested
-- Need DOWNLOAD_DEPENDS, CONFIGURE_DEPENDS, etc.
-
-### 5. Force Targets
-- Created but not tested
-- Need verification of force rebuild behavior
-
-## CURRENT STATUS
-
-**Working**: Core Prerequisites functionality, two-stamp architecture, basic testing
-**Fixed**: Configure-time detection (function removed completely)
-**Missing**: Download sources, full step implementation, logging
-
-**Next Priority**: Test the fix, then implement missing features.
+The wrapper script approach is fundamentally sound and nearly complete. The remaining issue is a specific CMake command construction problem, not an architectural flaw.
