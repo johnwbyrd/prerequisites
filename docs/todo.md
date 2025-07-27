@@ -1,84 +1,108 @@
 # Prerequisites System TODO (July 2025)
 
-## CRITICAL: Windows Double Execution Fix - PARTIALLY IMPLEMENTED
+## CRITICAL: Build-Time Execution Issue - ANALYSIS COMPLETE
 
-### Implementation Progress (54% Test Pass Rate)
+### Current Status Summary
 
-**COMPLETED**:
-- ✅ Root cause analysis: CMake `add_custom_command()` OUTPUT semantics conflict on Windows
-- ✅ Wrapper script generation architecture designed and implemented
-- ✅ `_Prerequisite_Create_Wrapper_Script()` function completed
-- ✅ Platform-specific script generation (Windows .bat, Unix .sh)
-- ✅ Integration with `_Prerequisite_Create_Build_Target()`
-- ✅ Cross-platform script template system
+**PROGRESS**: Root cause identified. Wrapper scripts lack dependency checking logic.
 
-**CURRENT ISSUE**: Command list parsing error
-- **Symptom**: `/c: /c: Is a directory` error during test execution
-- **Root Cause**: CMake interpreting `cmd /c` as separate command and argument instead of command with argument
-- **Location**: `_Prerequisite_Create_Wrapper_Script()` line 583: `set(${out_execute_command} ${executor} "${script_file}" PARENT_SCOPE)`
+**Test Results**:
+- ✅ **Configure-only tests**: Pass (using smart dependency logic)
+- ❌ **Build tests**: Fail due to wrapper scripts always executing
 
-### Immediate Next Task (HIGH PRIORITY)
+### Root Cause Analysis: COMPLETED
 
-**Fix command list construction** in `_Prerequisite_Create_Wrapper_Script()`:
-- Current: `set(executor cmd /c)` creates CMake list `[cmd, /c]`
-- Problem: `add_custom_command(COMMAND ${execute_command})` treats as command=`cmd`, arg1=`/c`, arg2=`script`
-- Solution: Build proper command list structure for CMake
+**The Problem**: Wrapper scripts are "dumb" - they always execute commands when invoked, while configure-time logic is "smart" with proper dependency checking.
 
-### Validated Working Components
+**Evidence**:
+- Configure-time execution has dependency checking (works correctly)
+- Build-time wrapper scripts have no dependency checking (always execute)
+- Test logs show "Counter incremented to 2" (should be 1)
 
-**Wrapper Script Generation**: ✅ WORKING
-- Scripts created at `${CMAKE_BINARY_DIR}/prerequisite-wrappers/${name}/${step}-wrapper.bat`
-- Correct stamp checking logic: `if exist "stamp" exit /b 0`
-- Proper error propagation: `if %errorlevel% neq 0 exit /b %errorlevel%`
-- Cross-platform compatibility maintained
+### Technical Analysis
 
-**vcxproj Integration**: ✅ IMPROVED
-- Clean command execution in generated Visual Studio projects
-- No more mangled quoted strings
-- Shows: `cmd /c C:/path/to/script.bat` (correct format)
-
-**Test Infrastructure**: ✅ FUNCTIONAL
-- 14/26 tests passing (54% pass rate)
-- All non-build tests passing (configure-time execution working)
-- All build-time failures due to same command parsing issue
-
-### Implementation Functions Added
-
-```cmake
-# Location: cmake/Prerequisite.cmake lines 538-584
-function(_Prerequisite_Create_Wrapper_Script name step command_list post_stamp_file out_execute_command)
-    # Creates platform-specific wrapper scripts with stamp checking
-    # Status: IMPLEMENTED, needs command list fix
-endfunction()
+**Current Wrapper Script Logic**:
+```bash
+# Always runs, no dependency checking
+user_command
+touch "post_stamp_file"
 ```
 
-**Modified**: `_Prerequisite_Create_Build_Target()` lines 613-622
-- Replaced direct command execution with wrapper script approach
-- Integration working, command parsing needs fix
+**Configure-Time Logic** (from `_Prerequisite_Process_Single_Step`):
+- Checks if post-stamp exists
+- For file dependencies: Checks if any tracked files are newer than post-stamp
+- Only executes if work is actually needed
 
-### Architecture Validation
+**The Fundamental Problem**: Wrapper scripts need the same dependency checking intelligence as configure-time execution.
 
-**Cross-Platform Design**: ✅ CONFIRMED
-- Windows: `@echo off` + batch syntax
-- Unix: `#!/bin/bash` + shell syntax  
-- Both: Proper error codes and stamp creation
+## IMMEDIATE PRIORITY: Smart Wrapper Scripts
 
-**CMake Integration**: ⚠️ PARTIAL
-- Script generation: Working
-- File permissions (Unix): Working (`file(CHMOD)`)
-- Command execution: Needs parsing fix
+### Solution Requirements
 
-## SECONDARY PRIORITIES (Deferred Until Fix Complete)
+**Generic Solution**: Make wrapper scripts intelligent about when execution is needed
+- Extract dependency checking logic into reusable functionality
+- Generate smart wrapper scripts that check dependencies before executing
+- Handle command-line length limits appropriately
+
+### Implementation Approach
+
+#### Phase 1: Extract Dependency Logic
+- Move dependency checking from `_Prerequisite_Process_Single_Step` (lines 720-757)
+- Create reusable function for both configure-time and wrapper scripts
+
+#### Phase 2: Smart Wrapper Script Generation
+- Pass dependency information to `_Prerequisite_Create_Wrapper_Script()`
+- Generate dependency checking code in wrapper scripts
+- Handle both stamp-only and file dependency cases
+- Always use dependency list files (assume many globbed files)
+
+#### Phase 3: Windows Batch Implementation
+**Keep it simple** - Windows batch has limited control flow:
+```batch
+@echo off
+REM Check dependencies via CMake script (handles complex logic)
+"${CMAKE_COMMAND}" -P "${CHECK_DEPS_SCRIPT}" "${POST_STAMP}" "${DEP_LIST_FILE}"
+if %errorlevel% equ 0 (
+    REM Dependencies indicate work needed
+    ${COMMAND}
+    if %errorlevel% equ 0 (
+        "${CMAKE_COMMAND}" -E touch "${POST_STAMP}"
+    ) else (
+        "${CMAKE_COMMAND}" -E remove -f "${POST_STAMP}"
+        exit /b %errorlevel%
+    )
+)
+```
+
+#### Dependency Checking Strategy
+- **Always use list files**: Assume many globbed dependencies
+- **Fatal on missing**: Dependencies missing at build time = error
+- **CMake script delegation**: All complex logic in CMake, not shell scripts
+- **Generate once**: All scripts/files generated at configure time
+
+### Implementation Location
+
+**Primary Files**:
+- `cmake/Prerequisite.cmake` lines 594-604: Wrapper script generation
+- `cmake/Prerequisite.cmake` lines 720-757: Dependency checking logic to extract
+
+### Validation Plan
+
+**Test both modes**:
+- Configure-time: Should continue working as before
+- Build-time: Wrapper scripts should only execute when dependencies change
+
+**Success Criteria**: 100% test pass rate with consistent behavior between modes
+
+## SECONDARY PRIORITIES (Deferred Until Core Fix)
 
 1. **Download Source Support** (GIT_REPOSITORY, URL) - Currently parsed but not implemented
 2. **Full Step Implementation** (UPDATE_COMMAND, CONFIGURE_COMMAND, TEST_COMMAND) 
 3. **Logging System** (LOG_* options) - Currently parsed but ignored
 4. **Advanced File Dependencies** (DOWNLOAD_DEPENDS, CONFIGURE_DEPENDS, etc.)
 
-## SUCCESS CRITERIA
+## Critical Understanding for Next Context
 
-**Target**: 100% test pass rate (currently 54%)
-**Blocker**: Single command parsing issue affecting all build-time tests
-**Timeline**: Should be resolved in single session once command list construction is fixed
+**The Prerequisites system architecture is sound** - the issue is missing dependency logic in wrapper scripts. The solution is making wrapper scripts as intelligent as configure-time execution, NOT platform-specific hacks.
 
-The wrapper script approach is fundamentally sound and nearly complete. The remaining issue is a specific CMake command construction problem, not an architectural flaw.
+**Key Insight**: The difference between working configure-time execution and failing build-time execution is the presence/absence of dependency checking logic.

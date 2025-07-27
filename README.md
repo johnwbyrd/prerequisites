@@ -176,11 +176,47 @@ Uses CMake's built-in commands for maximum portability. Works anywhere CMake wor
 
 ## Testing
 
-Prerequisites includes a comprehensive test suite covering all major functionality:
+Prerequisites includes a comprehensive test suite covering all major functionality.
 
+### Building and Running Tests
+
+**Unix/Linux/macOS:**
 ```bash
-cd tests && cmake . && ctest
-# 26/26 tests passing
+# Build
+mkdir build && cd build
+cmake ..
+
+# Run tests
+cd tests
+ctest --output-on-failure
+```
+
+**Windows (Visual Studio):**
+```bash
+# Build
+mkdir build && cd build
+cmake ..
+
+# Run tests (must specify configuration)
+cd tests
+ctest -C Debug --output-on-failure
+# or
+ctest -C Release --output-on-failure
+```
+
+**Alternative: Run from root directory:**
+```bash
+# Build
+cmake -B build
+
+# Run tests 
+cd build/tests
+
+# Unix/Linux/macOS:
+ctest --output-on-failure
+
+# Windows:
+ctest -C Debug --output-on-failure
 ```
 
 The tests verify immediate and deferred execution, file dependency tracking, variable substitution, stamp file behavior, and error handling. See [docs/testing.md](docs/testing.md) for detailed coverage analysis.

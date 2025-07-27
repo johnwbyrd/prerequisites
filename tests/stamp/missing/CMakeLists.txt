@@ -22,7 +22,7 @@ add_custom_target(test_missing_stamp
     # First build to create all stamps
     COMMAND "${CMAKE_COMMAND}" --build . --target missing-install
     # Remove the build post-stamp to simulate missing dependency
-    COMMAND "${CMAKE_COMMAND}" -E remove -f missing-prefix/src/missing-stamp/missing-build-post
+    COMMAND "${CMAKE_COMMAND}" -E remove -f missing-prefix/src/missing-stamp/missing-BUILD-post
     # Remove build output to verify it gets recreated
     COMMAND "${CMAKE_COMMAND}" -E remove -f "${OUTPUT_DIR}/build_output"
     COMMAND "${CMAKE_COMMAND}" -E remove -f "${OUTPUT_DIR}/install_output"

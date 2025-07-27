@@ -238,7 +238,7 @@ Functions
 set(_PREREQUISITE_PREFIX "_PREREQUISITE")
 
 # Debug flag - set to TRUE to enable debug messages  
-set(_PREREQUISITE_DEBUG FALSE CACHE BOOL
+set(_PREREQUISITE_DEBUG TRUE CACHE BOOL
     "Enable Prerequisites debug messages")
 
 # Internal step list - defines the order and names of all prerequisite steps
@@ -501,6 +501,11 @@ function(_Prerequisite_Execute_Immediate name step command working_dir
   _Prerequisite_Debug("  POST_STAMP_FILE: ${post_stamp_file}")
   _Prerequisite_Debug("  WORKING_DIR: ${working_dir}")
   _Prerequisite_Debug("  COMMAND: ${substituted_command}")
+  if(EXISTS "${post_stamp_file}")
+    _Prerequisite_Debug("  POST_STAMP exists before execution: YES")
+  else()
+    _Prerequisite_Debug("  POST_STAMP exists before execution: NO")
+  endif()
   
   execute_process(
     COMMAND ${substituted_command}
@@ -535,8 +540,49 @@ function(_Prerequisite_Execute_Immediate name step command working_dir
   endif()
 endfunction()
 
+# Platform-specific shell escaping for command arguments
+function(_Prerequisite_Quote_For_Shell command_list out_command_line)
+  set(quoted_args "")
+  
+  foreach(arg ${command_list})
+    if(WIN32)
+      # Windows batch escaping rules
+      # 1. Double any existing quotes
+      string(REPLACE "\"" "\"\"" escaped_arg "${arg}")
+      
+      # 2. Quote if contains special characters (space, tab, special batch chars)
+      if(escaped_arg MATCHES "[ \t\n&|<>^%]")
+        list(APPEND quoted_args "\"${escaped_arg}\"")
+      else()
+        list(APPEND quoted_args "${escaped_arg}")
+      endif()
+    else()
+      # Unix shell escaping with double quotes
+      # Escape: backslash, double quote, dollar sign, backtick
+      string(REPLACE "\\" "\\\\" escaped_arg "${arg}")
+      string(REPLACE "\"" "\\\"" escaped_arg "${escaped_arg}")
+      string(REPLACE "\$" "\\\$" escaped_arg "${escaped_arg}")
+      string(REPLACE "`" "\\`" escaped_arg "${escaped_arg}")
+      
+      # Quote if contains spaces or special characters
+      if(escaped_arg MATCHES "[ \t\n&|<>;*?\\[\\]{}~]")
+        list(APPEND quoted_args "\"${escaped_arg}\"")
+      else()
+        list(APPEND quoted_args "${escaped_arg}")
+      endif()
+    endif()
+  endforeach()
+  
+  string(JOIN " " result ${quoted_args})
+  set(${out_command_line} "${result}" PARENT_SCOPE)
+endfunction()
+
 # Create a wrapper script that checks stamps and executes commands conditionally
 function(_Prerequisite_Create_Wrapper_Script name step command_list post_stamp_file out_execute_command)
+  _Prerequisite_Debug("_Prerequisite_Create_Wrapper_Script(${name}, ${step})")
+  _Prerequisite_Debug("  command_list: ${command_list}")
+  _Prerequisite_Debug("  post_stamp_file: ${post_stamp_file}")
+  _Prerequisite_Debug("  CMAKE_GENERATOR: ${CMAKE_GENERATOR}")
   # Create wrapper script directory
   set(wrapper_dir "${CMAKE_BINARY_DIR}/prerequisite-wrappers/${name}")
   file(MAKE_DIRECTORY "${wrapper_dir}")
@@ -547,25 +593,23 @@ function(_Prerequisite_Create_Wrapper_Script name step command_list post_stamp_f
     set(executor cmd /c)
   else()
     set(script_file "${wrapper_dir}/${step}-wrapper.sh")
-    set(executor bash -c)
+    set(executor bash)
   endif()
   
-  # Convert command list to single command line
-  string(JOIN " " command_line ${command_list})
+  # Properly escape command for shell execution
+  _Prerequisite_Quote_For_Shell("${command_list}" command_line)
   
   # Generate platform-specific script content (multiline)
   if(WIN32)
     set(script_content "@echo off")
-    string(APPEND script_content "\nif exist \"${post_stamp_file}\" exit /b 0")
     string(APPEND script_content "\n${command_line}")
-    string(APPEND script_content "\nif %errorlevel% neq 0 exit /b %errorlevel%")
-    string(APPEND script_content "\necho. > \"${post_stamp_file}\"")
+  string(APPEND script_content "\nif %errorlevel% neq 0 exit /b %errorlevel%")
+  string(APPEND script_content "\n\"${CMAKE_COMMAND}\" -E touch \"${post_stamp_file}\"")
   else()
     set(script_content "#!/bin/bash")
-    string(APPEND script_content "\nif [ -f \"${post_stamp_file}\" ]; then exit 0; fi")
     string(APPEND script_content "\n${command_line}")
     string(APPEND script_content "\nif [ $? -ne 0 ]; then exit $?; fi")
-    string(APPEND script_content "\ntouch \"${post_stamp_file}\"")
+    string(APPEND script_content "\n\"${CMAKE_COMMAND}\" -E touch \"${post_stamp_file}\"")
   endif()
   
   # Convert \n to actual newlines for file writing
@@ -581,7 +625,11 @@ function(_Prerequisite_Create_Wrapper_Script name step command_list post_stamp_f
   
   # Return the execute command with native path format
   file(TO_NATIVE_PATH "${script_file}" native_script_file)
-  set(${out_execute_command} ${executor} "${native_script_file}" PARENT_SCOPE)
+  if(WIN32)
+    set(${out_execute_command} "${native_script_file}" PARENT_SCOPE)
+  else()
+    set(${out_execute_command} "bash" "${native_script_file}" PARENT_SCOPE)
+  endif()
 endfunction()
 
 # Create build-time target for a step using two-stamp architecture

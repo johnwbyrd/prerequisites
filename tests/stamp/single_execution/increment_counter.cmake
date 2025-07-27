@@ -1,0 +1,5 @@
+set(counter_file "${CMAKE_ARGV3}")
+file(READ "${counter_file}" count)
+math(EXPR count "${count} + 1")
+file(WRITE "${counter_file}" "${count}")
+message(STATUS "Counter incremented to ${count}")
