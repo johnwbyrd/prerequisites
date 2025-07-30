@@ -86,12 +86,6 @@ endif()
 **Supported Archive Types:**
 - `.tar`, `.tar.gz/.tgz`, `.tar.bz2/.tbz2`, `.tar.xz/.txz`, `.zip`, `.7z`
 
-**Smart Extraction Logic:**
-- Extract to temporary directory first
-- Detect single top-level directory in archives
-- Automatically strip unnecessary nesting levels
-- Use `file(RENAME)` to move to final location
-
 **Download Implementation:**
 - Multi-URL fallback support with `foreach(url @REMOTE@)`
 - Built-in retry logic and exponential backoff
@@ -109,7 +103,7 @@ Do not use the bash interface directly to run Windows commands.  You will be run
 **WARNING TO FUTURE CLAUDE INSTANCES**: This investigation repeatedly failed due to inconsistent test methodology and jumping to conclusions.
 
 **Documented Failure Pattern (July 27, 2025)**:
-When tasked with creating a simple test to understand `add_custom_command(OUTPUT ...)` behavior on Windows, Claude failed THREE TIMES to create consistent, reliable test infrastructure:
+When tasked with creating a simple test to understand `add_custom_command(OUTPUT ...)` behavior on Windows, Claude failed FOUR TIMES to create consistent, reliable test infrastructure:
 
 1. **First attempt**: Claimed command executed and created `output_log.txt`
 2. **Second attempt**: Claimed command did NOT execute, no `output_log.txt` created  
@@ -149,301 +143,53 @@ When tasked with creating a simple test to understand `add_custom_command(OUTPUT
 
 **Requirement**: Any future investigation MUST establish reliable, reproducible test methodology BEFORE attempting to understand or fix any issues.
 
-### Prerequisites System Build-Time Execution Issue (July 2025)
+### Current Diagnostic Challenge
 
-**CURRENT STATUS**: Prerequisites system has a design flaw causing unnecessary command execution during build time.
+**The Problem**: In clean build scenarios, configure-time commands are not executing when they should.
 
-**The Prerequisites System Architecture:**
-- **Two-stamp system**: Pre-stamp (dependencies ready) + Post-stamp (execution complete)
-- **Dual execution**: Configure-time via `execute_process()` + Build-time via `add_custom_command()`
-- **Wrapper scripts**: Platform-specific .bat/.sh scripts that run user commands and create post-stamps
+**Evidence:**
+- Counter files show 0 executions when tests expect 1
+- Post-stamp files exist prematurely in clean builds
+- Wrapper scripts correctly detect existing stamps and skip execution
 
-**Current Issue:**
+**Hypothesis**: Dual execution path interference
+- Configure-time may still use old `_Prerequisite_Execute_Immediate` path
+- Build-time uses new smart wrapper scripts
+- Timing/coordination issues between the two paths
 
-**Root Cause Discovered (July 27, 2025)**: Wrapper scripts lack dependency checking logic, causing them to always execute commands when invoked, regardless of whether work is actually needed.
+### Reconfigure Behavior Design Decision
 
-### Problem Analysis Completed
+**Issue Identified**: The Prerequisites system has inconsistent reconfigure behavior. On initial configure, commands execute regardless of existing stamps (clean build authority). On reconfigure, commands respect existing stamps and may skip execution (performance optimization).
 
-**What Works:**
-- ✅ **Configure-time execution**: Has proper dependency checking logic
-- ✅ **Single-run tests**: Configure-only tests pass (using smart dependency logic)
+**Design Decision - Hybrid Approach**:
 
-**What Fails:**
-- ❌ **Build-time execution**: Wrapper scripts always execute when invoked
-- ❌ **All `*_build` tests fail**: Commands run unnecessarily, counters increment beyond expected values
+**Default Behavior**: Clean stamps on reconfigure (configure is authoritative)
+- Most prerequisites are small/fast, so clean-by-default is acceptable
+- Provides simple, predictable behavior
+- Maintains "configure is authoritative" principle
 
-### Investigation Results
+**Per-Prerequisite Override**: Allow `RECONFIGURE_BEHAVIOR RESPECT_STAMPS` option
+- Large expensive prerequisites (compilers, toolchains) can opt into performance optimization
+- Users explicitly choose when performance matters more than simplicity
 
-**Previous Fix Attempt**: Removed post-stamp existence check from wrapper scripts to fix missing_build test.
-- **Result**: Fixed missing_build test but exposed fundamental design flaw
-- **Evidence**: Test logs show "Counter incremented to 2" instead of expected 1
+**Emergency Override**: Environment variable `PREREQUISITE_FORCE_CLEAN=1`
+- Provides escape hatch when stamp-respecting behavior causes issues
+- Allows users to force clean behavior globally when needed
 
-**Core Issue**: Wrapper scripts are "dumb" - they always execute commands, while configure-time logic is "smart" with proper dependency checking.
-
-### Technical Details
-
-**Current Wrapper Script Logic:**
-```bash
-# Always runs, no dependency checking
-user_command
-touch "post_stamp_file"
-```
-
-**Configure-Time Logic (from _Prerequisite_Process_Single_Step):**
-- Checks if post-stamp exists
-- For file dependencies: Checks if any tracked files are newer than post-stamp
-- Only executes if work is actually needed
-
-**The Fundamental Problem**: Wrapper scripts need the same dependency checking intelligence as configure-time execution.
-
-### Next Steps
-
-**The Solution**: Make wrapper scripts intelligent about when execution is needed:
-
-1. **Extract dependency checking logic** into reusable functionality
-2. **Generate smart wrapper scripts** that check dependencies before executing
-3. **Handle command-line length limits** by using CMake script delegation for dependency checking
-
-**Critical Files**:
-- `cmake/Prerequisite.cmake` lines 594-604: Wrapper script generation needs dependency logic
-- `cmake/Prerequisite.cmake` lines 720-757: Configure-time dependency checking to be extracted
-
-**Test Status**:
-- **Configure-only tests**: Pass (using smart logic)
-- **Build tests**: Fail due to missing dependency checks in wrapper scripts
-
-## Proposed Fix: Smart Wrapper Scripts
-
-### Overview
-
-The fundamental issue is that wrapper scripts unconditionally execute commands, while configure-time logic intelligently checks dependencies first. The solution is to make wrapper scripts equally intelligent by embedding dependency checking logic.
-
-### Two Implementation Variants
-
-#### 1. Precise Checking (Default)
-
-**Philosophy**: Perform careful dependency checking before execution, with basic validation after.
-
-**Pre-execution Checks**:
-- Verify post-stamp file existence
-- For file dependencies: Check if any tracked files are newer than post-stamp
-- Basic validation that dependencies exist (with warning, not failure)
-
-**Post-execution Checks**:
-- Verify command exit code
-- Create post-stamp on success
-- Clean up post-stamp on failure
-
-**Example Implementation**:
-```bash
-#!/bin/bash
-# Precise checking version
-
-# Check if work needed
-work_needed=false
-if [ ! -f "${POST_STAMP}" ]; then
-    work_needed=true
-else
-    # Check file dependencies
-    for dep in ${DEPENDENCIES}; do
-        if [ ! -f "$dep" ]; then
-            echo "WARNING: Dependency missing: $dep" >&2
-            # Continue checking other deps rather than breaking
-        elif [ "$dep" -nt "${POST_STAMP}" ]; then
-            work_needed=true
-            break
-        fi
-    done
-fi
-
-if [ "$work_needed" = "true" ]; then
-    # Execute command
-    ${COMMAND}
-    result=$?
-    
-    if [ $result -eq 0 ]; then
-        # Create post-stamp
-        touch "${POST_STAMP}"
-    else
-        # Clean up on failure
-        rm -f "${POST_STAMP}"
-        exit $result
-    fi
-fi
-```
-
-**Debug Mode Extensions** (only when `_PREREQUISITE_DEBUG=TRUE`):
-```bash
-# Additional checks in debug mode only
-if [ "${_PREREQUISITE_DEBUG}" = "TRUE" ]; then
-    # Validate working directory exists
-    if [ ! -d "${WORKING_DIR}" ]; then
-        echo "DEBUG: Working directory missing: ${WORKING_DIR}" >&2
-    fi
-    
-    # After execution, verify post-stamp creation
-    if [ ! -f "${POST_STAMP}" ]; then
-        echo "DEBUG: Failed to create post-stamp" >&2
-        exit 1
-    fi
-    
-    # Verify post-stamp is newer than dependencies
-    for dep in ${DEPENDENCIES}; do
-        if [ -f "$dep" ] && [ "$dep" -nt "${POST_STAMP}" ]; then
-            echo "DEBUG: Timestamp issue - post-stamp older than: $dep" >&2
-        fi
-    done
-fi
-```
-
-**Benefits**:
-- Reliable dependency checking
-- Handles missing dependencies gracefully
-- Clean error handling
-- Reasonable performance
-
-**Costs**:
-- Slightly more complex than loose mode
-- Minor overhead from dependency validation
-
-#### 2. Loose Checking (Opt-in for Tested Platforms)
-
-**Philosophy**: Trust the build system's dependency tracking and file system operations. Minimize checks for maximum performance.
-
-**Pre-execution Checks**:
-- Simple post-stamp existence check
-- For file dependencies: Basic newer-than comparison
-- No validation of environment
-
-**Post-execution Checks**:
-- Check command exit code only
-- Touch post-stamp on success
-- No post-condition validation
-
-**Example Implementation**:
-```bash
-#!/bin/bash
-# Loose checking version
-
-# Simple dependency check
-if [ -f "${POST_STAMP}" ]; then
-    need_rebuild=false
-    for dep in ${DEPENDENCIES}; do
-        if [ "$dep" -nt "${POST_STAMP}" ]; then
-            need_rebuild=true
-            break
-        fi
-    done
-    [ "$need_rebuild" = "false" ] && exit 0
-fi
-
-# Execute and update stamp
-${COMMAND} && touch "${POST_STAMP}"
-```
-
-**Benefits**:
-- Minimal overhead
-- Faster builds
-- Simple implementation
-
-**Costs**:
-- May miss edge cases
-- Less diagnostic information
-- Requires trusted environment
-
-### Mode Selection Strategy
-
-**Default**: Use precise checking for safety and correctness.
-
-**Opt-in to Loose Mode**:
+**Implementation Approach**:
 ```cmake
-# Global option
-set(PREREQUISITE_FAST_DEPS ON CACHE BOOL "Use fast dependency checking (less validation)")
+Prerequisite_Add(llvm
+    RECONFIGURE_BEHAVIOR RESPECT_STAMPS  # Keep expensive builds
+    # ... other options
+)
 
-# Per-prerequisite option
-Prerequisite_Add(mylib
-    FAST_DEPS TRUE  # Use loose checking for this prerequisite
-    ...
+Prerequisite_Add(my_small_tool  
+    # Uses default CLEAN_STAMPS behavior - simple and predictable
+    # ... other options  
 )
 ```
 
-**Platform-Specific Defaults**:
-```cmake
-# Auto-detect well-tested platforms
-if(CMAKE_GENERATOR STREQUAL "Unix Makefiles" AND NOT WIN32)
-    set(PREREQUISITE_FAST_DEPS_DEFAULT ON)
-else()
-    set(PREREQUISITE_FAST_DEPS_DEFAULT OFF)
-endif()
-```
-
-### Problems This Solves
-
-#### 1. **Unnecessary Rebuilds**
-- **Current**: Wrapper scripts always execute
-- **Fixed**: Smart dependency checking prevents redundant work
-- **Impact**: Faster incremental builds, reduced resource usage
-
-#### 2. **Inconsistent Behavior**
-- **Current**: Configure-time smart, build-time dumb
-- **Fixed**: Both modes use same dependency logic
-- **Impact**: Predictable behavior, easier debugging
-
-#### 3. **Test Failures**
-- **Current**: 5 failing tests due to double execution
-- **Fixed**: Commands execute exactly once when needed
-- **Impact**: 100% test pass rate
-
-#### 4. **Platform Differences**
-- **Current**: Different behavior across generators
-- **Fixed**: Consistent behavior with platform-specific optimizations
-- **Impact**: True cross-platform compatibility
-
-### Implementation Complexity
-
-The fix requires three main changes:
-
-1. **Extract dependency checking logic** from `_Prerequisite_Process_Single_Step` into reusable functions
-2. **Enhance wrapper script generation** to include dependency checks
-3. **Add configuration options** for precise/loose modes
-
-### Edge Cases Handled
-
-**Precise mode handles**:
-- Filesystem timestamp resolution limits
-- Concurrent modifications during build
-- Missing dependencies after configure
-- Network filesystem inconsistencies
-- Build interruption/recovery
-
-**Loose mode assumes**:
-- Filesystem timestamps are reliable
-- Dependencies don't disappear
-- No concurrent modifications
-- Local filesystem behavior
-
-### Performance Considerations
-
-**Configure Time**: No change (already has dependency checking)
-
-**Build Time**:
-- **Precise mode**: ~10-20ms overhead per prerequisite step (file stat operations)
-- **Loose mode**: ~2-5ms overhead per prerequisite step (minimal checks)
-- **Current broken state**: Wastes full command execution time
-
-For a typical prerequisite with 100 source files:
-- **Precise**: ~50ms to check all dependencies
-- **Loose**: ~10ms to check all dependencies
-- **Current**: Executes multi-second/minute builds unnecessarily
-
-### Validation Approach
-
-1. **Existing tests** should pass without modification
-2. **Add mode-specific tests** to verify both precise and loose behavior
-3. **Stress tests** for edge cases (timestamp resolution, concurrent builds)
-4. **Performance benchmarks** to measure overhead
-
-The precise mode ensures correctness even in challenging environments, while the loose mode provides optimal performance for trusted platforms. This design provides the best of both worlds: safety by default with performance when needed.
+This design provides the best of both worlds: simple default behavior that "just works" with performance optimization available where needed.
 
 ## Immediate Next Steps
 
