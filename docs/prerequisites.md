@@ -84,7 +84,7 @@ The PREFIX approach also makes it easy to share installations. Multiple prerequi
 
 ### Stamp files vs dependency tracking
 
-When a step finishes successfully, the system creates an empty file in the stamp directory. For a prerequisite named `myprereq`, you'd see files like `myprereq-download`, `myprereq-configure`, `myprereq-build`, etc. These aren't complex databases or logs -- just empty marker files whose timestamps indicate the completion of a step.  A target 
+When a step finishes successfully, the system creates an empty file in the stamp directory. For a prerequisite named `myprereq`, you'd see files like `myprereq-download`, `myprereq-configure`, `myprereq-build`, etc. These aren't complex databases or logs -- just empty marker files whose timestamps indicate the completion of a step.
 
 When a step fails, the system cleans up by removing stamps for that step and all subsequent steps. This prevents inconsistent states where you might have a build stamp but no install stamp because the build actually failed. It's better to rebuild too much than to have a half-working prerequisite.
 

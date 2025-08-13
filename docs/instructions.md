@@ -8,17 +8,28 @@ Traditional CMake projects assume that compilers and essential libraries already
 
 The prerequisites system breaks this deadlock by operating before the project() command runs. It can build your dependencies immediately during configuration so they're ready when project() executes, while also creating normal CMake targets for incremental rebuilds later.
 
-### Dual execution model
+### Single-Stamp Execution Model
 
-The prerequisites system operates in both configure time and build time modes. This isn't an accident -- it's what makes the whole thing useful.
+The prerequisites system uses a single-stamp architecture where each step has exactly one stamp file that marks successful completion. This stamp file serves as both:
+1. The output of the step's execution
+2. The dependency marker for subsequent steps
 
-When you call Prerequisite_Add() before project(), the system checks if your prerequisite needs building. If it does, it runs the build steps right then and there using execute_process(). Your CMake configuration pauses, the compiler gets built, and then configuration continues. This is how you bootstrap -- by the time CMake hits project() and starts looking for a compiler, it's already there.
+The system operates in both configure time and build time modes with identical behavior:
 
-But the system also creates regular CMake targets for every prerequisite. These targets check the same stamp files and run the same commands, but they execute during the build phase like any other target. So if you modify your prerequisite's source code and rebuild your main project, the prerequisite rebuilds automatically.
+1. **Configure Time**:
+   - Checks dependencies and executes steps if needed
+   - Creates stamp file only after successful execution
+   - Uses execute_process() for immediate execution
 
-This dual approach means you write your prerequisite once and it works for both scenarios. Initial bootstrap runs immediately during configuration. Daily development uses standard CMake dependency tracking. Same code, same commands, two execution paths.
+2. **Build Time**:
+   - Creates CMake targets that check the same stamp files
+   - Executes same commands if stamps are missing or outdated
+   - Maintains identical behavior to configure-time execution
 
-The key to this flexibility lies in how both execution modes share the same underlying step logic. Whether a step runs immediately during configuration or later during the build, the actual commands executed are identical. This consistency ensures that prerequisites behave the same way regardless of when they execute.
+The single-stamp design provides:
+- Simpler implementation with fewer files
+- Clearer dependency tracking
+- More reliable rebuild detection
 
 ### Integration with platforms
 
@@ -102,7 +113,7 @@ Do not use the bash interface directly to run Windows commands.  You will be run
 
 **WARNING TO FUTURE CLAUDE INSTANCES**: This investigation repeatedly failed due to inconsistent test methodology and jumping to conclusions.
 
-**Documented Failure Pattern (July 27, 2025)**:
+**Documented Failure Pattern**:
 When tasked with creating a simple test to understand `add_custom_command(OUTPUT ...)` behavior on Windows, Claude failed FOUR TIMES to create consistent, reliable test infrastructure:
 
 1. **First attempt**: Claimed command executed and created `output_log.txt`
@@ -133,13 +144,7 @@ When tasked with creating a simple test to understand `add_custom_command(OUTPUT
 
 **The Danger**: Claude consistently attempted to "solve" the Windows compatibility issue by proposing code changes based on flawed test results. This pattern of premature solution attempts based on bad data is extremely dangerous and wastes significant development time.
 
-**FAILURE COUNT UPDATE (July 27, 2025)**: Claude has now attempted FOUR TIMES to hack premature solutions without understanding root cause:
-1. **Generator-specific fix attempt**: Tried to detect Visual Studio and implement platform-specific logic
-2. **Post-stamp check removal**: Attempted to fix by checking if post-stamp exists before creating build commands  
-3. **Test infrastructure creation**: Failed three times to create consistent test methodology
-4. **Windows wrapper script fix**: Attempted to add post-stamp existence check only for Windows
-
-**PATTERN**: Each attempt was stopped by user intervention when Claude ignored the documented warnings and jumped directly to code modifications without proper investigation methodology.
+Each attempt was stopped by user intervention when Claude ignored the documented warnings and jumped directly to code modifications without proper investigation methodology.
 
 **Requirement**: Any future investigation MUST establish reliable, reproducible test methodology BEFORE attempting to understand or fix any issues.
 

@@ -18,7 +18,7 @@ Implement a unified dependency checker that:
 ## Architecture Overview
 
 The dependency checker consists of:
-- A CMake script (`prerequisite_dependency_checker.cmake`) that handles the core logic
+- A CMake script (`<step>-checker.cmake`), written at configure time from Prerequisite.cmake, that handles the core logic
 - A dependency list file (one path per line)
 - A command list file (CMake list format, one command per line)
 - A single stamp file marking successful completion
@@ -39,7 +39,7 @@ prerequisite-wrappers/
 - Empty file means no dependencies (command always runs)
 - Example:
   ```
-  C:/git/prerequisites/build/stamps/prereq-download-pre
+  C:/git/prerequisites/build/stamps/prereq-download
   C:/git/prerequisites/source/file1.txt
   C:/git/prerequisites/source/file2.txt
   ```
@@ -56,7 +56,7 @@ prerequisite-wrappers/
 
 ### Stamp File
 - Empty file created on successful command execution
-- Path: `${STAMP_DIR}/${name}-${step}-stamp`
+- Path: `${STAMP_DIR}/${name}-${step}`
 - Contains no content, only timestamp matters
 
 ## Execution Flow
@@ -272,7 +272,7 @@ FUNCTION setup_dependency_checker_build_time(name, step, binary_dir, log_dir, de
 
 1. Implement dependency checker script with platform-specific parsing
 2. Update `_Prerequisite_Create_Wrapper_Script` to generate command and dependency files
-3. Replace two-stamp architecture with single stamp
+3. Replaced two-stamp architecture with single stamp (completed)
 4. Update all prerequisite steps to use dependency checker
 5. Add comprehensive tests for Windows behavior
 
